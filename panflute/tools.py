@@ -247,6 +247,9 @@ def stringify(element, newlines=True):
     :rtype: :class:`str`
     """
 
+    def stop_if(e):
+        return isinstance(e, (DefinitionList, Cite))
+
     def attach_str(e, doc, answer):
         if hasattr(e, 'text'):
             ans = e.text
@@ -254,8 +257,15 @@ def stringify(element, newlines=True):
             ans = ' '
         elif isinstance(e, VerticalSpaces) and newlines:
             ans = '\n\n'
-        elif type(e) == Citation:
-            ans = ''
+        elif type(e) == DefinitionList:
+            ans = []
+            for item in e.content:
+                term = ''.join(stringify(part) for part in item.term)
+                definitions = '; '.join(stringify(defn) for defn in item.definitions)
+                ans.append(f'- {term}: {definitions}')
+            ans = '\n'.join(ans)
+        elif type(e) == Cite:
+            ans = stringify(e.content)
         else:
             ans = ''
 
@@ -270,7 +280,7 @@ def stringify(element, newlines=True):
 
     answer = []
     f = partial(attach_str, answer=answer)
-    element.walk(f)
+    element.walk(f, stop_if=stop_if)
     return ''.join(answer)
 
 

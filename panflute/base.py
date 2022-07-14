@@ -8,7 +8,6 @@ Base classes and methods of all Pandoc elements
 
 from operator import attrgetter
 from collections.abc import MutableSequence, MutableMapping
-from itertools import chain
 
 from .containers import ListContainer, DictContainer
 from .utils import check_type, encode_dict  # check_group
@@ -37,6 +36,18 @@ class Element(object):
     def tag(self):
         tag = type(self).__name__
         return tag
+
+    def __eq__(self, other):
+        # Doc has a different method b/c it uses __dict__ instead of slots
+        if type(self) != type(other):
+            return False
+
+        for key in self.__slots__:
+            if getattr(self, key) != getattr(other, key):
+                return False
+
+        return True
+
 
     # ---------------------------
     # Base methods
@@ -218,7 +229,7 @@ class Element(object):
             guess = guess.parent  # If no parent, this will be None
         return guess  # Returns either Doc or None
 
-    def walk(self, action, doc=None, walk_inlines=True):
+    def walk(self, action, doc=None, stop_if=None):
         """
         Walk through the element and all its children (sub-elements),
         applying the provided function ``action``.
@@ -243,6 +254,8 @@ class Element(object):
             other variables). Only use this variable if for some reason
             you don't want to use the current document of an element.
         :type doc: :class:`.Doc`
+        :param stop_if: function that takes (element) as argument.
+        :type stop_if: :class:`function`, optional
         :rtype: :class:`Element` | ``[]`` | ``None``
         """
 
@@ -250,31 +263,22 @@ class Element(object):
         if doc is None:
             doc = self.doc
 
-        # First iterate over children
-        for child in self._children:
-            obj = getattr(self, child)
+        # First iterate over children; unless the stop condition is met
+        if stop_if is None or not stop_if(self):
 
-            if isinstance(obj, Element):
-                obj = obj.walk(action, doc)
-            elif isinstance(obj, ListContainer):
-                #if not walk_inlines and isinstance(obj.oktypes, Block):
-                #    continue
-                obj = (item.walk(action, doc) for item in obj)
-                # We need to convert single elements to iterables, so that they
-                # can be flattened later
-                obj = ((item,) if type(item) is not list else item for item in obj)
-                # Flatten the list, by expanding any sublists
-                obj = list(chain.from_iterable(obj))
-            elif isinstance(obj, DictContainer):
-                obj = [(k, v.walk(action, doc)) for k, v in obj.items()]
-                obj = [(k, v) for k, v in obj if v != []]
-            elif obj is None:
-                obj = None  # Empty table headers or captions
-            else:
-                raise TypeError(type(obj))
-            setattr(self, child, obj)
+            # self._children has property *names* so we need a bit of getattr/setattr magic to modify the objects themselves
+            children = ((child_name, getattr(self, child_name)) for child_name in self._children)
 
-        # Then apply the action to the root element
+            for child_name, child in children:
+                if isinstance(child, (Element, ListContainer, DictContainer)):
+                    child = child.walk(action, doc, stop_if)
+                elif child is None:
+                    child = None  # Empty table headers or captions
+                else:
+                    raise TypeError(type(child))
+                setattr(self, child_name, child)
+
+        # Then apply the action() to the root element
         altered = action(self, doc)
         return self if altered is None else altered
 

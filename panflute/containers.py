@@ -8,6 +8,7 @@ object, and the attribute of the parent object that they correspond to.
 # ---------------------------
 
 from collections.abc import MutableSequence, MutableMapping
+from itertools import chain
 from .utils import check_type, encode_dict, debug
 
 
@@ -76,11 +77,30 @@ class ListContainer(MutableSequence):
         v = check_type(v, self.oktypes)
         self.list.insert(i, v)
 
+    def walk(self, action, doc=None, stop_if=None):
+        ans = (item.walk(action, doc, stop_if) for item in self)
+        # We need to convert single elements to iterables that can be flattened later
+        ans = ((item,) if type(item) is not list else item for item in ans)
+        # Flatten the list, by expanding any sublists
+        ans = list(chain.from_iterable(ans))
+        return ans
+
     def __str__(self):
         return self.__repr__()
 
     def __repr__(self):
         return 'ListContainer({})'.format(' '.join(repr(x) for x in self.list))
+
+    def __eq__(self, other):
+        # We can't compare on .parent b/c then we would get a circular reference
+        if (self.oktypes != other.oktypes) or (self.location != other.location):
+            return False
+        if len(self.list) != len(other.list):
+            return False
+        for x, y in zip(self.list, other.list):  # , strict=True
+            if x != y:
+                return False
+        return True
 
     def to_json(self):
         return [to_json_wrapper(item) for item in self.list]
@@ -125,6 +145,11 @@ class DictContainer(MutableMapping):
     def __setitem__(self, k, v):
         v = check_type(v, self.oktypes)
         self.dict[k] = v
+
+    def walk(self, action, doc=None, stop_if=None):
+        ans = ((k, v.walk(action, doc, stop_if)) for k, v in self.items())
+        ans = [(k, v) for k, v in ans if v != []]
+        return ans
 
     def __str__(self):
         return self.__repr__()
